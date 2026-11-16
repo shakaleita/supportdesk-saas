@@ -71,3 +71,15 @@ test('status-only ticket updates retain the assigned agent',async t=>{
  assert.equal(tickets[0].agent_id,agent.lastInsertRowid);
  assert.equal(tickets[0].status,'pending');
 });
+
+test('workflow history captures one transition and ignores no-op updates', async t=>{
+  const {child,dir,base}=await start();
+  t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+  assert.equal((await json(base,"/api/tickets","POST",{"subject":"Audit Ticket","customer_email":"review@example.com","description":"Audit workflow"}))[0],200);
+  assert.equal((await json(base,"/api/tickets/1","PATCH",{"status":"pending"}))[0],200);
+  let [status,events]=await json(base,'/api/tickets/1/history');
+  assert.equal(status,200);
+  assert.equal(events.length,1);
+  assert.equal(events[0].new_value,"pending");
+  assert.equal((await json(base,'/api/tickets/999999/history'))[0],404);
+});
