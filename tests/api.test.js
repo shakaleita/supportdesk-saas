@@ -55,3 +55,19 @@ test('CSV export endpoint: documented, read-only, safely cached', async t => {
   const contents=await response.text();
   assert.ok(contents.includes('"id"'));
 });
+
+
+test('status-only ticket updates retain the assigned agent',async t=>{
+ const {child,dir,base}=await start();
+ t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+ const [,agent]=await json(base,'/api/agents','POST',{name:'Ada'});
+ const [,ticket]=await json(base,'/api/tickets','POST',{
+  subject:'Access request',customer_email:'test@example.com',
+  description:'Please review',priority:'normal'
+ });
+ await json(base,'/api/tickets/'+ticket.lastInsertRowid,'PATCH',{agent_id:agent.lastInsertRowid});
+ await json(base,'/api/tickets/'+ticket.lastInsertRowid,'PATCH',{status:'pending'});
+ const [,tickets]=await json(base,'/api/tickets');
+ assert.equal(tickets[0].agent_id,agent.lastInsertRowid);
+ assert.equal(tickets[0].status,'pending');
+});
