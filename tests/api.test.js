@@ -81,5 +81,9 @@ test('workflow history captures one transition and ignores no-op updates', async
   assert.equal(status,200);
   assert.equal(events.length,1);
   assert.equal(events[0].new_value,"pending");
+  assert.equal((await json(base,"/api/tickets/1",'PATCH',{"status":"pending"}))[0],200);
+  const [,eventsAfterNoop]=await json(base,'/api/tickets/1/history');
+  assert.equal(eventsAfterNoop.length,1);
+
   assert.equal((await json(base,'/api/tickets/999999/history'))[0],404);
 });
