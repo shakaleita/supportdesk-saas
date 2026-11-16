@@ -87,3 +87,26 @@ test('workflow history captures one transition and ignores no-op updates', async
 
   assert.equal((await json(base,'/api/tickets/999999/history'))[0],404);
 });
+
+test('response-time report tracks notes and excludes customer details', async t => {
+ const {child,dir,base}=await start();
+ t.after(()=>{child.kill();rmSync(dir,{recursive:true,force:true})});
+ const [,one]=await json(base,'/api/tickets','POST',{
+   subject:'Urgent synthetic issue',customer_email:'sensitive@example.test',
+   description:'Demo only',priority:'urgent'});
+ await json(base,'/api/tickets','POST',{
+   subject:'Other synthetic issue',customer_email:'other@example.test',
+   description:'Demo only',priority:'urgent'});
+ const before=await json(base,'/api/tickets/first-response-report');
+ assert.equal(before[0],200);
+ assert.equal(before[1].by_priority.find(x=>x.priority==='urgent').awaiting_response,2);
+ const [noteStatus]=await json(base,'/api/tickets/'+one.lastInsertRowid+'/notes','POST',{body:'First response'});
+ assert.equal(noteStatus,200);
+ const [status,report]=await json(base,'/api/tickets/first-response-report');
+ assert.equal(status,200);
+ const urgent=report.by_priority.find(x=>x.priority==='urgent');
+ assert.equal(urgent.responded,1);
+ assert.equal(urgent.awaiting_response,1);
+ assert.equal(typeof urgent.avg_first_response_minutes,'number');
+ assert.ok(!JSON.stringify(report).includes('sensitive@example.test'));
+});
