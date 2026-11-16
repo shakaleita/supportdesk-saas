@@ -71,6 +71,14 @@ app.get('/api/export/tickets.csv', (_req,res)=>{
 
 // Lightweight service introspection: intentionally no secrets or database contents.
 app.get('/api/health',(_req,res)=>{try{db.prepare('SELECT 1').get();res.json({status:'ok',service:process.env.npm_package_name||'portfolio-service'})}catch(_e){res.status(503).json({status:'unavailable'})}});
+app.get('/api/tickets/aging-report',(_req,res)=>{
+  try {
+    const {report}=require('./lib/aging');
+    const tickets=db.prepare('SELECT status,priority,created_at FROM tickets').all();
+    res.set('Cache-Control','no-store');
+    res.json(report(tickets));
+  }catch(_error){res.status(500).json({error:'Unable to calculate aging report'})}
+});
 app.get('/api/insights',(_req,res)=>{try{res.json((()=>{ const statuses=db.prepare('SELECT status,COUNT(*) count FROM tickets GROUP BY status ORDER BY status').all();const priority=db.prepare('SELECT priority,COUNT(*) count FROM tickets GROUP BY priority ORDER BY priority').all();const unassigned=db.prepare("SELECT COUNT(*) n FROM tickets WHERE agent_id IS NULL AND status != 'resolved'").get().n;return {tickets_by_status:statuses,tickets_by_priority:priority,unassigned_open_tickets:unassigned}; })())}catch(_e){res.status(500).json({error:'Unable to load insights'})}});
 app.use((err,req,res,next)=>{if(err&&err.type==='entity.too.large')return res.status(413).json({error:'Request body too large'});if(err instanceof SyntaxError && 'body' in err)return res.status(400).json({error:'Malformed JSON'});return res.status(500).json({error:'Unexpected server error'})});
 app.listen(Number(process.env.PORT)||3000);
