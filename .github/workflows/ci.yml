@@ -20,7 +20,5 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Syntax and domain tests
         run: npm run check
-        env:
-          DB_FILE: ':memory:'
       - name: Dependency audit
         run: npm audit --audit-level=high
