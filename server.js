@@ -21,6 +21,20 @@ app.get('/api/tickets',wrap(req=>{const {status,priority}=req.query;if(status&&!
 app.post('/api/tickets',wrap(req=>{const {subject,customer_email,description,priority='normal'}=req.body;if(!subject?.trim()||!/^\S+@\S+\.\S+$/.test(customer_email||'')||!description?.trim()||!['low','normal','urgent'].includes(priority))throw Error('Valid subject, email, description, and priority required');return db.prepare('INSERT INTO tickets(subject,customer_email,description,priority) VALUES(?,?,?,?)').run(subject.trim(),customer_email,description.trim(),priority)}));
 app.patch('/api/tickets/:id',wrap(req=>{const {status,agent_id}=req.body;if(status&&!['open','pending','resolved'].includes(status))throw Error('Invalid status');const r=db.prepare('UPDATE tickets SET status=COALESCE(?,status),agent_id=? WHERE id=?').run(status||null,agent_id||null,req.params.id);if(!r.changes)throw Error('Ticket not found');return {updated:true}}));
 app.get('/api/tickets/:id/notes',wrap(req=>db.prepare('SELECT * FROM notes WHERE ticket_id=? ORDER BY id DESC').all(req.params.id)));app.post('/api/tickets/:id/notes',wrap(req=>{if(!req.body.body?.trim())throw Error('Note required');return db.prepare('INSERT INTO notes(ticket_id,body) VALUES(?,?)').run(req.params.id,req.body.body.trim())}));
+// Safe, read-only CSV export for the local tickets dataset.
+app.get('/api/export/tickets.csv', (_req,res)=>{
+  try {
+    const {serialize}=require('./lib/csv');
+    const stmt=db.prepare("SELECT id,subject,customer_email,priority,status,created_at FROM tickets ORDER BY id");
+    const rows=stmt.all();
+    const columns=stmt.columns().map(column=>column.name);
+    res.set('Content-Type','text/csv; charset=utf-8');
+    res.set('Content-Disposition','attachment; filename="tickets.csv"');
+    res.set('Cache-Control','no-store');
+    res.send(serialize(rows,columns));
+  }catch(_error){res.status(500).json({error:'CSV export unavailable'})}
+});
+
 // Lightweight service introspection: intentionally no secrets or database contents.
 app.get('/api/health',(_req,res)=>{try{db.prepare('SELECT 1').get();res.json({status:'ok',service:process.env.npm_package_name||'portfolio-service'})}catch(_e){res.status(503).json({status:'unavailable'})}});
 app.get('/api/insights',(_req,res)=>{try{res.json((()=>{ const statuses=db.prepare('SELECT status,COUNT(*) count FROM tickets GROUP BY status ORDER BY status').all();const priority=db.prepare('SELECT priority,COUNT(*) count FROM tickets GROUP BY priority ORDER BY priority').all();const unassigned=db.prepare("SELECT COUNT(*) n FROM tickets WHERE agent_id IS NULL AND status != 'resolved'").get().n;return {tickets_by_status:statuses,tickets_by_priority:priority,unassigned_open_tickets:unassigned}; })())}catch(_e){res.status(500).json({error:'Unable to load insights'})}});
