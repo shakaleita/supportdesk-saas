@@ -79,6 +79,39 @@ app.get('/api/tickets/aging-report',(_req,res)=>{
     res.json(report(tickets));
   }catch(_error){res.status(500).json({error:'Unable to calculate aging report'})}
 });
+// Privacy-conscious first-response metrics; no customer identifiers leave this endpoint.
+app.get('/api/tickets/first-response-report',(_req,res)=>{
+  try {
+    const cases=db.prepare(`SELECT t.priority,
+      t.id AS ticket_id,
+      t.created_at AS opened_at,
+      MIN(n.created_at) AS first_note_at
+      FROM tickets t LEFT JOIN notes n ON n.ticket_id=t.id
+      GROUP BY t.id`).all();
+    const groups={low:{tickets:0,responded:0,awaiting_response:0,total_minutes:0},
+      normal:{tickets:0,responded:0,awaiting_response:0,total_minutes:0},
+      urgent:{tickets:0,responded:0,awaiting_response:0,total_minutes:0}};
+    for(const ticket of cases){
+      const group=groups[ticket.priority];if(!group)continue;
+      group.tickets++;
+      if(ticket.first_note_at===null){group.awaiting_response++;continue}
+      const start=Date.parse(ticket.opened_at.replace(' ','T')+'Z');
+      const first=Date.parse(ticket.first_note_at.replace(' ','T')+'Z');
+      if(!Number.isFinite(start)||!Number.isFinite(first))continue;
+      group.responded++;
+      group.total_minutes+=Math.max(0,Math.round((first-start)/60000));
+    }
+    const by_priority=Object.entries(groups).map(([priority,group])=>({
+      priority,tickets:group.tickets,responded:group.responded,
+      awaiting_response:group.awaiting_response,
+      avg_first_response_minutes:group.responded?
+        Math.round(group.total_minutes/group.responded*10)/10:null
+    }));
+    res.set('Cache-Control','no-store');
+    res.json({method:'first_internal_note',by_priority,
+      total_tickets:by_priority.reduce((sum,g)=>sum+g.tickets,0)});
+  }catch(_error){res.status(500).json({error:'Unable to calculate response times'})}
+});
 app.get('/api/insights',(_req,res)=>{try{res.json((()=>{ const statuses=db.prepare('SELECT status,COUNT(*) count FROM tickets GROUP BY status ORDER BY status').all();const priority=db.prepare('SELECT priority,COUNT(*) count FROM tickets GROUP BY priority ORDER BY priority').all();const unassigned=db.prepare("SELECT COUNT(*) n FROM tickets WHERE agent_id IS NULL AND status != 'resolved'").get().n;return {tickets_by_status:statuses,tickets_by_priority:priority,unassigned_open_tickets:unassigned}; })())}catch(_e){res.status(500).json({error:'Unable to load insights'})}});
 app.use((err,req,res,next)=>{if(err&&err.type==='entity.too.large')return res.status(413).json({error:'Request body too large'});if(err instanceof SyntaxError && 'body' in err)return res.status(400).json({error:'Malformed JSON'});return res.status(500).json({error:'Unexpected server error'})});
 app.listen(Number(process.env.PORT)||3000);
